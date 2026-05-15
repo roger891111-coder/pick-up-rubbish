@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>海洋不塑連連看</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+        body {
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(135deg, #1ca7ec 0%, #1f2f98 100%);
+            font-family: "Microsoft JhengHei", sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        header {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            color: white;
+        }
+        h1 {
+            font-size: 28px;
+            font-weight: 900;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        #score-board {
+            font-size: 20px;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
+            backdrop-filter: blur(5px);
+        }
+        /* 9x9 遊戲地圖外殼 */
+        #game-board {
+            position: relative;
+            background: rgba(255, 255, 255, 0.1);
+            border: 4px solid #fff;
+            border-radius: 12px;
+            padding: 8px;
+            display: grid;
+            grid-template-columns: repeat(9, 55px);
+            grid-template-rows: repeat(9, 55px);
+            gap: 4px;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.4);
+        }
+        /* 每個卡牌格子 */
+        .cell {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.16);
+        }
+        .cell:hover {
+            transform: scale(1.05);
+            background: #fff;
+        }
+        /* 被選取的狀態 */
+        .cell.selected {
+            background: #ffdeeb !important;
+            outline: 3px solid #ff6b6b;
+            transform: scale(0.95);
+        }
+        /* 空白邊框通道（不可選、透明） */
+        .cell.empty {
+            background: transparent;
+            box-shadow: none;
+            cursor: default;
+            pointer-events: none;
+        }
+        .cell svg {
+            width: 80%;
+            height: 80%;
+        }
+        /* 連線畫布層 */
+        #line-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        /* 結束彈窗 */
+        #modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+        .modal-content h2 { font-size: 36px; color: #2b8a3e; margin-bottom: 15px; }
+        .modal-content p { font-size: 20px; margin-bottom: 25px; color: #495057; }
+        .btn {
+            padding: 12px 30px; font-size: 18px; font-weight: bold; color: white;
+            background: #228be6; border: none; border-radius: 25px; cursor: pointer;
+            box-shadow: 0 4px 6px rgba(34,139,230,0.3); transition: background 0.2s;
+        }
+        .btn:hover { background: #1c7ed6; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>海洋不塑連連看</h1>
+        <div id="score-board">剩餘數量: <span id="remain-count">0</span></div>
+    </header>
+
+    <div id="game-board">
+        <!-- 用於繪製消除連線的畫布 -->
+        <canvas id="line-canvas"></canvas>
+    </div>
+
+    <div id="modal">
+        <div class="modal-content">
+            <h2>🎉 挑戰成功</h2>
+            <p>你成功清空了所有配對，還給海洋一片乾淨！</p>
+            <button class="btn" onclick="resetGame()">再玩一次</button>
+        </div>
+    </div>
+
+    <script>
+        // 定義 6 種原創 SVG 圖標（魚、水母、海龜、保特瓶、飲料杯、塑膠袋）
+        const itemIcons = {
+            1: `<svg viewBox="0 0 50 50"><path d="M5 25 C15 10, 35 15, 45 25 C35 35, 15 40, 5 25 Z" fill="#ff922b"/><path d="M5 25 L1 18 L1 32 Z" fill="#ff922b"/><circle cx="35" cy="22" r="2" fill="#000"/></svg>`, // 橘色小魚
+            2: `<svg viewBox="0 0 50 50"><path d="M10 25 C10 10, 40 10, 40 25 C40 28, 10 28, 10 25 Z" fill="#da77f2"/><path d="M15 26 Q15 40 18 42 M25 26 Q25 45 23 42 M35 26 Q35 40 32 42" stroke="#da77f2" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`, // 水母
+            3: `<svg viewBox="0 0 50 50"><circle cx="25" cy="25" r="14" fill="#5c940d"/><circle cx="25" cy="8" r="5" fill="#5c940d"/><path d="M10 20 L4 16 M40 20 L46 16 M10 32 L5 36 M40 32 L45 36" stroke="#5c940d" stroke-width="4" stroke-linecap="round"/></svg>`, // 海龜
+            4: `<svg viewBox="0 0 40 80"><rect x="12" y="5" width="16" height="12" rx="3" fill="#a5d8ff"/><rect x="6" y="17" width="28" height="58" rx="8" fill="#74c0fc"/><line x1="6" y1="35" x2="34" y2="35" stroke="#4dabf7" stroke-width="3"/></svg>`, // 保特瓶
+            5: `<svg viewBox="0 0 50 70"><path d="M10 15 L40 15 L35 65 L15 65 Z" fill="#e3faf2" stroke="#96f2d7" stroke-width="3"/><ellipse cx="25" cy="15" rx="16" ry="5" fill="#66d9e8"/></svg>`, // 飲料杯
+            6: `<svg viewBox="0 0 60 60"><path d="M15 20 C15 5, 25 5, 25 20 L35 20 C35 5, 45 5, 45 20 C55 20, 55 55, 30 55 C5 55, 5 20, 15 20 Z" fill="rgba(255,255,255,0.7)" stroke="#ced4da" stroke-width="3"/></svg>` // 塑膠袋
+        };
+
+        const ROWS = 9;
+        const COLS = 9;
+        let map = []; // 儲存 9x9 矩陣數據（0 代表空通道）
+        let firstSelected = null; // 紀錄首次點選的坐標 {r, c}
+        let totalItems = 0;
+
+        const board = document.getElementById('game-board');
+        const canvas = document.getElementById('line-canvas');
+        const ctx = canvas.getContext('2d');
+        const remainDisplay = document.getElementById('remain-count');
+        const modal = document.getElementById('modal');
+
+        // 初始化/重置遊戲
+        function resetGame() {
+            modal.style.display = 'none';
+            firstSelected = null;
+            
+            // 1. 計算內部可放方塊的總數 (扣除最外圍一圈作爲連線通道，即 7x7 區域 = 49 格)
+            // 由於連連看必須成對，我們取 48 格填入有圖案的卡牌，其餘留空。
+            const innerCellsCount = 48; 
+            let pool = [];
+            
+            // 均勻產生雙雙成對的種類代號（1~6）
+            for(let i = 0; i < innerCellsCount / 2; i++) {
+                let type = (i % 6) + 1;
+                pool.push(type, type);
+            }
+            // 洗牌（隨機打亂）
+            pool.sort(() => Math.random() - 0.5);
+
+            // 2. 建立 9x9 地圖（最外圍一圈 r=0, r=8, c=0, c=8 皆為 0 作為必通線路）
+            map = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+            let index = 0;
+            for(let r = 1; r < ROWS - 1; r++) {
+                for(let c = 1; c < COLS - 1; c++) {
+                    if (index < pool.length) {
+                        map[r][c] = pool[index++];
+                    } else {
+                        map[r][c] = 0; // 剩下一格填空
+                    }
+                }
+            }
+
+            totalItems = pool.length;
+            remainDisplay.textContent = totalItems;
+            
+            renderBoard();
+            resizeCanvas();
+        }
+
+        // 渲染 9x9 網格
+        function renderBoard() {
+            // 清除除了 Canvas 以外的所有格子舊節點
+            const cells = board.querySelectorAll('.cell');
+            cells.forEach(c => c.remove());
+
+            for(let r = 0; r < ROWS; r++) {
+                for(let c = 0; c < COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.dataset.r = r;
+                    cell.dataset.c = c;
+
+                    if (map[r][c] === 0) {
+                        cell.className = 'cell empty';
+                    } else {
+                        cell.className = 'cell';
+                        cell.innerHTML = itemIcons[map[r][c]];
+                        cell.addEventListener('click', () => handleCellClick(r, c));
+                    }
+                    board.appendChild(cell);
+                }
+            }
+        }
+
+        // 點擊事件處理
+        function handleCellClick(r, c) {
+            if (map[r][c] === 0) return;
+
+            const clickedCell = board.querySelector(`[data-r='${r}'][data-c='${c}']`);
+
+            if (!firstSelected) {
+                // 第一次選擇
+                firstSelected = { r, c };
+                clickedCell.classList.add('selected');
+            } else {
+                const firstCell = board.querySelector(`[data-r='${firstSelected.r}'][data-c='${firstSelected.c}']`);
+                
+                // 如果點到同一個，取消選擇
+                if (firstSelected.r === r && firstSelected.c === c) {
+                    clickedCell.classList.remove('selected');
+                    firstSelected = null;
+                    return;
+                }
+
+                // 種類相同才進行路徑檢測
+                if (map[firstSelected.r][firstSelected.c] === map[r][c]) {
+                    let path = findPath(firstSelected, { r, c });
+                    if (path) {
+                        // 成功連線：消除卡牌
+                        map[firstSelected.r][firstSelected.c] = 0;
+                        map[r][c] = 0;
+                        
+                        drawLinkLine(path); // 繪製折線
+
+                        // 動態移除樣式
+                        firstCell.style.visibility = 'hidden';
+                        clickedCell.style.visibility = 'hidden';
+
+                        totalItems -= 2;
+                        remainDisplay.textContent = totalItems;
+
+                        if (totalItems === 0) {
+                            setTimeout(() => { modal.style.display = 'flex'; }, 500);
+                        }
+                    }
+                }
+                
+                // 清除選取狀態
+                if(firstCell) firstCell.classList.remove('selected');
+                firstSelected = null;
+            }
+        }
+
+        // =================【經典連連看核心算法：尋找三折線內的路徑】=================
+        function findPath(p1, p2) {
+            // 直線檢測 (0 個轉折點)
+            if (hasLine(p1, p2)) return [p1, p2];
+
+            // 一個轉折點檢測 (1 個轉折點)
+            // 轉折點 A: (p1.r, p2.c)
+            let c1 = { r: p1.r, c: p2.c };
+            if (map[c1.r][c1.c] === 0 && hasLine(p1, c1) && hasLine(c1, p2)) return [p1, c1, p2];
+            
+            // 轉折點 B: (p2.r, p1.c)
+            let c2 = { r: p2.r, c: p1.c };
+            if (map[c2.r][c2.c] === 0 && hasLine(p1, c2) && hasLine(c2, p2)) return [p1, c2, p2];
+
+            // 兩個轉折點檢測 (2 個轉折點) - 橫向或縱向掃描外圍通道
+            // 1. 垂直方向延伸掃描
+            for (let r = 0; r < ROWS; r++) {
+                let t1 = { r: r, c: p1.c };
+                let t2 = { r: r, c: p2.c };
+                if ((r === p1.r || map[r][p1.c] === 0) && (r === p2.r || map[r][p2.c] === 0)) {
+                    if (hasLine(p1, t1) && hasLine(t1, t2) && hasLine(t2, p2)) {
+                        return [p1, t1, t2, p2];
+                    }
+                }
+            }
+            // 2. 水平方向延伸掃描
+            for (let c = 0; c < COLS; c++) {
+                let t1 = { r: p1.r, c: c };
+                let t2 = { r: p2.r, c: c };
+                if ((c === p1.c || map[p1.r][c] === 0) && (c === p2.c || map[p2.r][c] === 0)) {
+                    if (hasLine(p1, t1) && hasLine(t1, t2) && hasLine(t2, p2)) {
+                        return [p1, t1, t2, p2];
+                    }
+                }
+            }
+            return null;
+        }
+
+        // 兩點之間是否存在無阻礙直線
+        function hasLine(p1, p2) {
+            if (p1.r !== p2.r && p1.c !== p2.c) return false;
+            if (p1.r === p2.r) { // 同一行
+                let minC = Math.min(p1.c, p2.c);
+                let maxC = Math.max(p1.c, p2.c);
+                for (let c = minC + 1; c < maxC; c++) {
+                    if (map[p1.r][c] !== 0) return false;
+                }
+            } else { // 同一列
+                let minR = Math.min(p1.r, p2.r);
+                let maxR = Math.max(p1.r, p2.r);
+                for (let r = minR + 1; r < maxR; r++) {
+                    if (map[r][p1.c] !== 0) return false;
+                }
+            }
+            return true;
+        }
+
+        // =================【劃線動畫效果】=================
+        function resizeCanvas() {
+            canvas.width = board.clientWidth;
+            canvas.height = board.clientHeight;
+        }
+
+        function drawLinkLine(path) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            
+            // 計算格子大小中心點
+            const gap = 4;
+            const cellSize = 55;
+            const padding = 8;
+
+            path.forEach((pt, idx) => {
+                let x = padding + pt.c * (cellSize + gap) + cellSize / 2;
+                let y = padding + pt.r * (cellSize + gap) + cellSize / 2;
+                if (idx === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+
+            ctx.strokeStyle = '#ff3366';
+            ctx.lineWidth = 4;
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+
+            // 0.3 秒後自動隱藏連線
+            setTimeout(() => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                // 刷新通道格子樣式
+                renderBoard(); 
+            }, 300);
+        }
+
+        // 初始化
+        window.addEventListener('load', resetGame);
+        window.addEventListener('resize', () => { resizeCanvas(); renderBoard(); });
+    </script>
+</body>
+</html>
